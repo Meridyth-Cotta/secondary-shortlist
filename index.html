@@ -301,6 +301,28 @@ h1{
 
 .empty{grid-column:1/-1;padding:48px 0;text-align:center;color:var(--ink-3);font-size:14px}
 
+/* ---------- notes ---------- */
+.notes-sec{background:var(--card);border:1px solid var(--rule);border-radius:4px;padding:16px;margin:22px 0 8px}
+.notes-sec h4{font-family:var(--mono);font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--ink-3);margin:0 0 4px;font-weight:600}
+.notes-sec .sub{font-size:12.5px;color:var(--ink-3);margin:0 0 10px}
+.notes-sec textarea{
+  width:100%;min-height:150px;resize:vertical;font:inherit;font-size:14px;line-height:1.55;
+  color:var(--ink);background:var(--paper);border:1px solid var(--rule);border-radius:3px;padding:10px 12px;
+}
+.notes-sec textarea:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+.notes-sec .status{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);margin-top:6px;min-height:14px}
+.tile .notebadge{
+  position:absolute;top:12px;right:12px;font-family:var(--mono);font-size:9px;letter-spacing:.1em;
+  text-transform:uppercase;padding:2px 6px;border-radius:2px;background:var(--card);color:var(--ink-2);border:1px solid var(--rule);
+}
+
+/* ---------- parent views ---------- */
+.pv-strength{display:inline-block;font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;padding:2px 6px;border-radius:2px;border:1px solid var(--rule);color:var(--ink-2);margin-bottom:8px}
+.pv-strength.STRONG{color:var(--good);border-color:color-mix(in srgb,var(--good) 45%,transparent)}
+.pv-strength.THIN,.pv-strength.NONE{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
+.pv h5{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;margin:12px 0 6px;color:var(--ink-3);font-weight:600}
+.pv h5.pos{color:var(--good)} .pv h5.neg{color:var(--crit)}
+
 /* ---------- briefing ---------- */
 .brief{
   margin-top:14px;border:1px solid var(--rule);border-radius:3px;background:var(--card);
@@ -514,6 +536,45 @@ footer p{margin:0 0 8px}
     indep:"Fee‑paying. Decided by entrance assessment, with the real question being whether a means‑tested bursary closes the gap."
   };
   var current = "all";
+
+  /* ---- notes store: shared db inside Claude, this-browser storage elsewhere ---- */
+  var NOTES = {};
+  var notesMode = "local";
+  var LS_KEY = "secondary-shortlist-notes-v1";
+  var dbRef = null;
+  function lsRead(){ try{ return JSON.parse(localStorage.getItem(LS_KEY)||"{}")||{}; }catch(e){ return {}; } }
+  function lsWrite(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(NOTES)); return true; }catch(e){ return false; } }
+  NOTES = lsRead();
+  function notesStatusText(){
+    return notesMode==="db" ? "Saved to this page · anyone with the link can see these notes"
+                            : "Saved in this browser only · not visible to anyone else";
+  }
+  function saveNote(id, text){
+    NOTES[id] = text;
+    if(notesMode==="db" && dbRef){
+      return dbRef.doc("notes/"+id).set({text:text, updatedAt:new Date().toISOString()})
+        .then(function(){ return true; }, function(){ lsWrite(); return false; });
+    }
+    return Promise.resolve(lsWrite());
+  }
+  (function connectDb(){
+    if(!window.claude || typeof window.claude.use!=="function") return;
+    window.claude.use("db").then(function(db){
+      if(!db) return;
+      dbRef = db; notesMode = "db";
+      db.collection("notes").onSnapshot(function(snap){
+        var docs = (snap && (snap.docs || snap)) || [];
+        docs.forEach(function(d){
+          var id = d.id, data = (typeof d.data==="function") ? d.data() : (d.data||d);
+          if(id && data && typeof data.text==="string") NOTES[id] = data.text;
+        });
+        renderGrid();
+        var ta = document.getElementById("note-ta");
+        if(ta && document.activeElement!==ta && ta.dataset.id && NOTES[ta.dataset.id]!==undefined) ta.value = NOTES[ta.dataset.id];
+        var st = document.getElementById("note-status"); if(st && !st.dataset.busy) st.textContent = notesStatusText();
+      });
+    }, function(){});
+  })();
   var lastFocus = null;
 
   var $ = function(id){ return document.getElementById(id); };
@@ -573,6 +634,7 @@ footer p{margin:0 0 8px}
         '<div><dt>Next open day</dt><dd class="mono">'+esc(s.next_open_day)+'</dd></div>'+
       '</dl>'+
       (flags ? '<div class="flagrow">'+flags+'</div>' : '')+
+      (NOTES[s.id] && NOTES[s.id].trim() ? '<span class="notebadge">Notes</span>' : '')+
       '<div class="more">Full detail &rarr;</div>'+
     '</button>';
   }
@@ -670,6 +732,17 @@ footer p{margin:0 0 8px}
     html += section("Who is at the school", d.population_rows ? kvlist(d.population_rows) : "");
     html += section("Diversity, equity and inclusion", para(d.dei));
     html += section("Open days and visiting", para(d.open_days_detail));
+    if(d.parents){
+      var pv = d.parents, list = function(a){ return (a&&a.length) ? '<ul>'+a.map(function(x){return '<li>'+esc(x)+'</li>';}).join('')+'</ul>' : ''; };
+      var body = '<div class="pv"><span class="pv-strength '+esc((pv.strength||'').split(' ')[0])+'">Evidence: '+esc((pv.strength||'').toLowerCase())+'</span>'+
+        (pv.recency ? '<p>'+esc(pv.recency)+'</p>' : '')+
+        (pv.change ? '<div class="note warn">'+esc(pv.change)+'</div>' : '')+
+        (pv.positives&&pv.positives.length ? '<h5 class="pos">What parents praise</h5>'+list(pv.positives) : '')+
+        (pv.negatives&&pv.negatives.length ? '<h5 class="neg">What parents criticise</h5>'+list(pv.negatives) : '')+
+        (pv.mixed&&pv.mixed.length ? '<h5>Where parents disagree</h5>'+list(pv.mixed) : '')+
+        '<p class="sub" style="font-size:12px;color:var(--ink-3)">Paraphrased from parent forums and review sites. Forum posters are self-selecting, so treat these as signals to probe on a visit rather than a verdict.</p></div>';
+      html += section("What parents say", body);
+    }
     html += section("Worth knowing", para(d.other_info));
     if(d.sources && d.sources.length){
       html += section("Sources", '<div class="srcs">'+d.sources.map(function(u){
@@ -677,7 +750,25 @@ footer p{margin:0 0 8px}
         return '<a href="'+esc(u)+'" target="_blank" rel="noopener noreferrer">'+esc(label)+"</a>";
       }).join("")+"</div>");
     }
+    html += '<section class="notes-sec"><h4>Comments and notes</h4>'+
+      '<p class="sub">Visit impressions, questions to ask, anything to remember.</p>'+
+      '<textarea id="note-ta" data-id="'+esc(s.id)+'" placeholder="Type your notes here\u2026">'+esc(NOTES[s.id]||"")+'</textarea>'+
+      '<div class="status" id="note-status">'+esc(notesStatusText())+'</div></section>';
     $("drawer-body").innerHTML = html;
+    (function wireNotes(){
+      var ta = $("note-ta"), st = $("note-status"), timer = null;
+      if(!ta) return;
+      ta.addEventListener("input", function(){
+        st.dataset.busy = "1"; st.textContent = "Saving\u2026";
+        clearTimeout(timer);
+        timer = setTimeout(function(){
+          saveNote(ta.dataset.id, ta.value).then(function(ok){
+            st.dataset.busy = ""; st.textContent = ok ? notesStatusText() : "Could not save \u2014 copy your note somewhere safe";
+            renderGrid();
+          });
+        }, 700);
+      });
+    })();
     $("drawer-body").scrollTop = 0;
     $("drawer").classList.add("open");
     $("scrim").classList.add("open");
