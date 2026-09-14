@@ -736,6 +736,7 @@ footer p{margin:0 0 8px}
       var pv = d.parents, list = function(a){ return (a&&a.length) ? '<ul>'+a.map(function(x){return '<li>'+esc(x)+'</li>';}).join('')+'</ul>' : ''; };
       var body = '<div class="pv"><span class="pv-strength '+esc((pv.strength||'').split(' ')[0])+'">Evidence: '+esc((pv.strength||'').toLowerCase())+'</span>'+
         (pv.recency ? '<p>'+esc(pv.recency)+'</p>' : '')+
+        (pv.caution ? '<div class="note crit"><strong>Read with care.</strong> '+esc(pv.caution)+'</div>' : '')+
         (pv.change ? '<div class="note warn">'+esc(pv.change)+'</div>' : '')+
         (pv.positives&&pv.positives.length ? '<h5 class="pos">What parents praise</h5>'+list(pv.positives) : '')+
         (pv.negatives&&pv.negatives.length ? '<h5 class="neg">What parents criticise</h5>'+list(pv.negatives) : '')+
